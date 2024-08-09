@@ -13,7 +13,47 @@ from sklearn.svm import SVC
 import matplotlib.pyplot as plt
 import seaborn as sns
 import shap
+from scipy.stats import skew
 
+def read_csv(csv_file: str):
+    return pd.read_csv(csv_file)
+
+def change_column_type(df: pd.DataFrame, column: str, type: str):
+    df.loc[:, column] = df[column].astype(type)
+    return df
+
+def checking_class_imbalance(df: pd.DataFrame, class_feature: str, title: str):
+    count_classes = df[class_feature].value_counts()
+    percentage = (count_classes / count_classes.sum()) * 100
+    
+    # Define color palette
+    colors = ['steelblue', 'firebrick']
+    
+    ax = count_classes.plot(kind='bar', rot=0, color=colors)
+    ax.set_title(title)
+    ax.set_xlabel(class_feature)
+    ax.set_ylabel("Frequency")
+    
+    # Add percentage labels to each bar
+    for i, v in enumerate(count_classes):
+        ax.text(i, v, f"{v} ({percentage[i]:.1f}%)", ha='center', va='bottom')
+    
+    return plt.show()
+
+def treat_skewed_columns(df):
+    # Get the list of numerical columns
+    numerical_columns = df.select_dtypes(include=np.number).columns.tolist()
+    
+    # Find skewed columns
+    skewed_columns = df[numerical_columns].apply(lambda x: skew(x)).abs().sort_values(ascending=False)
+    skewed_columns = skewed_columns[skewed_columns > 0.5]  # Set the threshold for skewness as desired
+    
+    # Apply logarithmic transformation to skewed columns
+    for col in skewed_columns.index:
+        df[col] = np.log1p(df[col])
+
+    return df
+    
 
 # Import other necessary libraries for the remaining techniques
 def check_missing_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -28,6 +68,32 @@ def check_missing_data(df: pd.DataFrame) -> pd.DataFrame:
                 print(f"{col}: {missing_rows} missing rows")
         else:
             print("No columns have missing data.")
+
+
+def plot_numeric_features(df: pd.DataFrame):
+    # Determine the number of features and calculate grid dimensions
+    num_features = len(df.select_dtypes(include=['number']).columns)
+    num_cols = 2
+    num_rows = (num_features - 1) // num_cols + 1
+    
+    # Create subplots with grid layout
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(12, 10))
+    axes = axes.flatten()  # Flatten the array of axes
+    
+    # Plot density plot and histogram for each numerical feature
+    for i, column in enumerate(df.select_dtypes(include='number')):
+        sns.histplot(data=df, x=column, kde=True, ax=axes[i], bins=int(700/12), color = 'darkblue')
+        axes[i].set_xlabel(column)
+        axes[i].set_ylabel('Density')
+        axes[i].set_title(f'Density Plot with Histogram of {column}')
+    
+    # Remove any unused subplots
+    if num_features < len(axes):
+        for j in range(num_features, len(axes)):
+            fig.delaxes(axes[j])
+    
+    plt.tight_layout()  # Adjust spacing between subplots
+    return plt.show()
 
 def replace_missing_data(df: pd.DataFrame, method: str = 'mean') -> pd.DataFrame:
     # Create a copy of the DataFrame
@@ -46,18 +112,15 @@ def replace_missing_data(df: pd.DataFrame, method: str = 'mean') -> pd.DataFrame
 
     return filled_df
 
-def drop_columns(df: pd.DataFrame, columns_to_drop: list) -> pd.DataFrame:
+def drop_missing_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     Drops unwanted columns from a DataFrame.
-
     Args:
-        df (pd.DataFrame): Input DataFrame.
-        columns_to_drop (list): List of column names to drop.
-
+        df (pd.DataFrame): Input DataFrame.  
     Returns:
         pd.DataFrame: DataFrame with unwanted columns dropped.
     """
-    df_dropped = df.drop(columns=columns_to_drop, inplace=False)
+    df_dropped = df.dropna(subset=df.columns)
     
     return df_dropped
 
@@ -70,7 +133,6 @@ def encode_categorical_features(df: pd.DataFrame) -> pd.DataFrame:
     return encoded_df
 
 def scale_numerical_features(df: pd.DataFrame, target_feature: str) -> pd.DataFrame:
-    
     # Scale numerical features using StandardScaler
     scaled_df = df.copy()
     numerical_cols = df.select_dtypes(include=['int64', 'float64']).columns
@@ -148,7 +210,6 @@ def train_models(trained_df: pd.DataFrame, target_feature: str, models: list, te
     # Add a column to indicate the best model based on accuracy
     results_df['Best Model'] = False
     results_df.loc[best_model_idx, 'Best Model'] = True
-
 
     return results_df
 
