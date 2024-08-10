@@ -220,22 +220,22 @@ def train_models(trained_df: pd.DataFrame, target_feature: str, models: list, te
         models (list): List of model instances.
         test_size (float, optional): The proportion of the dataset to include in the test split. Default is 0.2.
         cv (int, optional): Number of cross-validation folds. Default is 10.
-        extra_columns_to_remove (List[str], optional): Additional columns to remove from features.
 
     Returns:
         pd.DataFrame: DataFrame with model names and evaluation metrics.
     """
 
     # Split the data into training and test sets
-    X_train, X_test, y_train, y_test = split_train_validation(trained_df, target_feature, test_size, random_state = 42)
+    X_train, X_test, y_train, y_test = split_train_validation(trained_df, target_feature, test_size, random_state=42)
 
     results = []
     best_accuracy = 0.0
-    best_model_idx = 0
+    best_model = None
+    best_model_name = ""
 
     for idx, model in enumerate(models):
         model_name = model.__class__.__name__
-        
+
         # Perform cross-validation
         scores = cross_val_score(model, X_train, y_train, cv=cv, scoring='accuracy')
 
@@ -247,33 +247,45 @@ def train_models(trained_df: pd.DataFrame, target_feature: str, models: list, te
 
         # Calculate evaluation metrics
         accuracy = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred, average='weighted')
-        recall = recall_score(y_test, y_pred, average='weighted')
-        f1 = f1_score(y_test, y_pred, average='weighted')
-        #fpr, tpr, thresholds = roc_curve(y_test, y_pred_prob_1)
+        precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+        recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+        f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
 
         # Compute confusion matrix
         cm = confusion_matrix(y_test, y_pred)
 
         # Append the results to the list
         results.append([model_name, scores.mean(), scores.std(), accuracy, precision, recall, f1, cm])
-        
+
         # Check if current model has better accuracy
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            best_model_idx = idx
-            
-            # Save the best model
-            joblib.dump(model, f"best_model_{model_name}.joblib")
-            print(f"Best model {model_name} saved to best_model_{model_name}.joblib")
+            best_model = model
+            best_model_name = model_name
+
+    # Save the best model
+    if best_model is not None:
+        joblib.dump(best_model, f"best_model_{best_model_name}.joblib")
+        print(f"Best model {best_model_name} saved to best_model_{best_model_name}.joblib")
+
+        # Calculate SHAP values for the best model
+        explainer = shap.Explainer(best_model, X_train)
+        shap_values = explainer(X_train)
+
+        # Plot SHAP summary plot
+        shap.summary_plot(shap_values, X_train, plot_type='bar')
+        plt.title(f'SHAP Summary Plot for Best Model: {best_model_name}')
+        plt.show()
 
     # Create a DataFrame with the results
     columns = ['Model', 'Mean CV Accuracy', 'CV Accuracy Std', 'Accuracy', 'Precision', 'Recall', 'F1-Score', 'Confusion Matrix']
     results_df = pd.DataFrame(results, columns=columns)
-    
+
     # Add a column to indicate the best model based on accuracy
     results_df['Best Model'] = False
-    results_df.loc[best_model_idx, 'Best Model'] = True
+    if best_model is not None:
+        best_model_idx = results_df[results_df['Model'] == best_model_name].index[0]
+        results_df.loc[best_model_idx, 'Best Model'] = True
 
     return results_df
 
