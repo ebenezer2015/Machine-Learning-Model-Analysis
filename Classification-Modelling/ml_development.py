@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Tuple, List
 import seaborn as sns
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import LabelEncoder, StandardScaler, MinMaxScaler
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from sklearn.tree import DecisionTreeClassifier
@@ -10,10 +11,10 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.svm import SVC
-import matplotlib.pyplot as plt
-import seaborn as sns
+from sklearn.base import BaseEstimator
 import shap
 from scipy.stats import skew
+import joblib
 
 def read_csv(csv_file: str):
     return pd.read_csv(csv_file)
@@ -124,11 +125,47 @@ def drop_missing_columns(df: pd.DataFrame) -> pd.DataFrame:
     
     return df_dropped
 
+def remove_unwanted_columns(df: pd.DataFrame, columns_to_remove: List[str]) -> pd.DataFrame:
+    """
+    Removes specified columns from a DataFrame.
 
-def encode_categorical_features(df: pd.DataFrame) -> pd.DataFrame:
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+        columns_to_remove (list): A list of column names to be removed.
+
+    Returns:
+        pd.DataFrame: A DataFrame with the specified columns removed.
+    """
+    # Check if all specified columns exist in the DataFrame
+    existing_columns = [col for col in columns_to_remove if col in df.columns]
     
-    # Encode categorical features using one-hot encoding
-    encoded_df = pd.get_dummies(df, drop_first=True)
+    # Drop the unwanted columns
+    df_cleaned = df.drop(columns=existing_columns, axis=1)
+    
+    return df_cleaned
+    
+def encode_categorical_features(df: pd.DataFrame, target_feature: str) -> pd.DataFrame:
+    """
+    Encodes categorical features in the DataFrame using one-hot encoding,
+    excluding the target feature.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+        target_feature (str): The name of the target feature column.
+
+    Returns:
+        pd.DataFrame: A DataFrame with categorical features one-hot encoded,
+                      except for the target feature.
+    """
+    # Separate the target feature
+    target = df[target_feature]
+    
+    # Encode the categorical features, excluding the target feature
+    features_to_encode = df.drop(columns=[target_feature])
+    encoded_features = pd.get_dummies(features_to_encode, drop_first=True)
+    
+    # Combine the encoded features with the target feature
+    encoded_df = pd.concat([encoded_features, target], axis=1)
     
     return encoded_df
 
@@ -147,27 +184,50 @@ def scale_numerical_features(df: pd.DataFrame, target_feature: str) -> pd.DataFr
 
     return scaled_df
 
-def train_models(trained_df: pd.DataFrame, target_feature: str, models: list, test_size: float = 0.2, cv: int = 10) -> pd.DataFrame:
+
+def split_train_validation(trained_df: pd.DataFrame, target_feature: str, test_size: float = 0.2, random_state: int = 42):
     """
-    Trains multiple machine learning models using cross-validation, returns the model results, feature importance
-    using SHAP, and confusion matrix in a DataFrame.
+    Splits the DataFrame into training and validation sets.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+        target_column (str): The name of the target column.
+        test_size (float, optional): The proportion of the dataset to include in the validation split. Default is 0.2.
+        random_state (int, optional): The seed used by the random number generator. Default is 42.
+
+    Returns:
+        pd.DataFrame, pd.DataFrame, pd.Series, pd.Series: Training and validation sets for features and target.
+    """
+    # Separate the features and target
+    X = trained_df.drop(target_feature, axis=1)
+    y = trained_df[target_feature]
+
+    # Split into training and validation sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
+
+    return X_train, X_test, y_train, y_test
+
+
+def train_models(trained_df: pd.DataFrame, target_feature: str, models: list, test_size: float = 0.2,
+                 cv: int = 10) -> pd.DataFrame:
+    """
+    Trains multiple machine learning models using cross-validation, returns the model results,
+    and saves the best model to the working directory.
 
     Args:
         trained_df (pd.DataFrame): Pre-split training dataset.
         target_feature (str): Name of the target feature column.
-        models (dict): Dictionary containing model names as keys and corresponding model instances as values.
+        models (list): List of model instances.
         test_size (float, optional): The proportion of the dataset to include in the test split. Default is 0.2.
-        cv (int, optional): Number of cross-validation folds. Default is 5.
+        cv (int, optional): Number of cross-validation folds. Default is 10.
+        extra_columns_to_remove (List[str], optional): Additional columns to remove from features.
 
     Returns:
-        pd.DataFrame: DataFrame with model names, evaluation metrics (accuracy, precision, recall, f1-score),
-                      feature importance/explanations, and confusion matrix.
+        pd.DataFrame: DataFrame with model names and evaluation metrics.
     """
-    X = trained_df.drop(target_feature, axis=1)
-    y = trained_df[target_feature]
 
     # Split the data into training and test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+    X_train, X_test, y_train, y_test = split_train_validation(trained_df, target_feature, test_size, random_state = 42)
 
     results = []
     best_accuracy = 0.0
@@ -202,6 +262,10 @@ def train_models(trained_df: pd.DataFrame, target_feature: str, models: list, te
         if accuracy > best_accuracy:
             best_accuracy = accuracy
             best_model_idx = idx
+            
+            # Save the best model
+            joblib.dump(model, f"best_model_{model_name}.joblib")
+            print(f"Best model {model_name} saved to best_model_{model_name}.joblib")
 
     # Create a DataFrame with the results
     columns = ['Model', 'Mean CV Accuracy', 'CV Accuracy Std', 'Accuracy', 'Precision', 'Recall', 'F1-Score', 'Confusion Matrix']
@@ -213,7 +277,7 @@ def train_models(trained_df: pd.DataFrame, target_feature: str, models: list, te
 
     return results_df
 
-def plot_best_model_explanation(results_df, models, trained_df, target_feature):
+def plot_best_model_explanation(results_df, models, trained_df, target_feature, test_size, extra_columns_to_remove: List[str] = None):
     """
     Generates the SHAP summary plot for the best model based on the results DataFrame.
 
@@ -225,7 +289,21 @@ def plot_best_model_explanation(results_df, models, trained_df, target_feature):
     """
     best_model_idx = results_df[results_df['Best Model'] == True].index[0]
     best_model_name = results_df.loc[best_model_idx, 'Model']
-    X_train = trained_df.drop(target_feature, axis=1)  # Assuming trained_df is the pre-split training dataset
+    
+    # Construct a list of columns to remove
+    if extra_columns_to_remove is None:
+        extra_columns_to_remove = []
+    
+    columns_to_remove = extra_columns_to_remove + [target_feature]
+    
+    #X_train = trained_df.drop(columns=columns_to_remove, axis=1)  # Remove specified columns, including the target feature
+    
+    # One-hot encode categorical variables
+    X, y = encode_categorical_features(trained_df, target_feature, extra_columns_to_remove)
+    #X_train_encoded = pd.get_dummies(X_train, drop_first=True)
+    # Split the data into training and test sets
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
 
     # Retrieve the best model
     best_model = models[best_model_idx]
@@ -247,7 +325,41 @@ def plot_best_model_explanation(results_df, models, trained_df, target_feature):
     # Plot the SHAP summary plot for the best model
     shap.summary_plot(shap_values, X_train, plot_type='bar', class_names=best_model.classes_)
 
+def load_model(filename: str):
+    """
+    Loads a model from a file.
 
+    Args:
+        filename (str): File path to load the model from.
+
+    Returns:
+        The loaded model instance.
+    """
+    model = joblib.load(filename)
+    print(f"Model loaded from {filename}")
+    return model
+
+def shuffle_and_split(data: pd.DataFrame, target_feature: str, test_size: float = 0.4, random_state: int = None, columns_to_remove: List[str] = None):
+    """
+    Randomly shuffles a DataFrame and splits it into two samples.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame to shuffle and split.
+        test_size (float, optional): The proportion of the DataFrame to include in the test sample. Defaults to 0.4.
+        random_state (int, optional): The random seed for reproducibility. Defaults to None.
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the two resulting samples.
+    """
+
+    trained_df = remove_unwanted_columns(data, columns_to_remove)
+    trained_df = scale_numerical_features(data, target_feature)
+    trained_df = encode_categorical_features(data, target_feature)
+    
+    # Use train_test_split to shuffle and split the DataFrame
+    train_sample, test_sample = train_test_split(trained_df, test_size=test_size, random_state=random_state)
+
+    return train_sample, test_sample
 
 
 
