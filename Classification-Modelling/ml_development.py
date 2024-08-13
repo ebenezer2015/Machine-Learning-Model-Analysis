@@ -55,7 +55,6 @@ def treat_skewed_columns(df):
 
     return df
     
-
 # Import other necessary libraries for the remaining techniques
 def check_missing_data(df: pd.DataFrame) -> pd.DataFrame:
         display(df.info())
@@ -372,8 +371,6 @@ def shuffle_and_split(data: pd.DataFrame, target_feature: str, test_size: float 
     train_sample, test_sample = train_test_split(trained_df, test_size=test_size, random_state=random_state)
 
     return train_sample, test_sample
-
-
 
 
 
