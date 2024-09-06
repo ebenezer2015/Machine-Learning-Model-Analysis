@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import shap
+# import shap
 from imblearn.over_sampling import SMOTE, RandomOverSampler
 from imblearn.under_sampling import RandomUnderSampler
 from scipy.stats import skew
@@ -41,7 +41,7 @@ def checking_class_dist(df: pd.DataFrame, class_feature: str, title: str):
     return plt.show()
 
 
-def treat_skewed_columns(df) -> pd.DataFrame::
+def treat_skewed_columns(df) -> pd.DataFrame:
     # Get the list of numerical columns
     numerical_columns = df.select_dtypes(include=np.number).columns.tolist()
 
@@ -59,6 +59,9 @@ def treat_skewed_columns(df) -> pd.DataFrame::
 # Import other necessary libraries for the remaining techniques
 def check_missing_data(df: pd.DataFrame) -> pd.DataFrame:
     missing_columns = df.columns[df.isnull().any()].tolist()
+    # display(df.info())
+    # display(df.head())
+    # display(df.describe())
     if len(missing_columns) > 0:
         print("Columns with missing data:")
         for col in missing_columns:
@@ -167,11 +170,11 @@ def shuffle_and_split(data: pd.DataFrame, target_feature: str, test_size: float 
     data = remove_unwanted_columns(data, columns_to_remove)    
     train_sample, validation_sample = train_test_split(data, test_size=test_size, random_state=random_state,
                                                        stratify=data[target_feature])
-                                     
+                            
     return train_sample, validation_sample
 
 
-def handle_class_imbalance(X, y, technique: str = 'SMOTE', random_state: int = 42):
+def handle_class_imbalance(X, y, technique: str = 'SMOTE', random_state: int = None):
     """
     Handles class imbalance using the specified technique.
 
@@ -198,31 +201,27 @@ def handle_class_imbalance(X, y, technique: str = 'SMOTE', random_state: int = 4
     return X_resampled, y_resampled
 
 
-def prepare_data(df: pd.DataFrame, target_feature: str, test_size: float = 0.2, random_state: int = None,
-                 balance_technique: str = 'SMOTE') -> Tuple:
+def prepare_data(X: pd.DataFrame, y: pd.Series, test_size: float = 0.2, random_state: int = None) -> Tuple:
     """
     Prepare the data for machine learning by handling class imbalance, encoding features, and splitting the dataset.
 
     Args:
-        df (pd.DataFrame): The input dataframe containing features and the target variable.
-        target_feature (str): The name of the target feature column.
+        X (pd.DataFrame): The input dataframe containing features.
+        y (pd.Series): The target series.
         test_size (float): The proportion of the dataset to include in the test split.
-        random_state (int): The seed used by the random number generator.
-        balance_technique (str): Technique for handling class imbalance ('undersampling', 'oversampling', 'SMOTE').
+        random_state (int): The seed used by the random number generator.   
 
     Returns:
-        X_train_balanced (np.ndarray): Balanced and preprocessed training features.
-        X_test (np.ndarray): Preprocessed test features.
-        y_train_balanced (np.ndarray): Balanced training target values.
+        X_train_transformed (np.ndarray): Balanced and preprocessed training features.
+        X_test_transformed (np.ndarray): Preprocessed test features.
+        y_train (np.ndarray): Balanced training target values.
         y_test (np.ndarray): Test target values.
+        transformed_feature_names (list): List of names of the transformed features.
     """
-    # Split the data into features and target
-    X = df.drop(columns=[target_feature])
-    y = df[target_feature]
 
     # Split the data into training and testing sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, random_state,
-                                                        test_size=test_size, stratify=y)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, stratify=y, 
+                                                        random_state=random_state)
 
     # Identify categorical and numerical columns
     categorical_cols = X_train.select_dtypes(include=['object', 'category']).columns.tolist()
@@ -241,15 +240,14 @@ def prepare_data(df: pd.DataFrame, target_feature: str, test_size: float = 0.2, 
     X_train_transformed = preprocessor.fit_transform(X_train)
     X_test_transformed = preprocessor.transform(X_test)
 
-    # Handle class imbalance using the specified technique
-    X_train_balanced, y_train_balanced = handle_class_imbalance(X_train_transformed, y_train, 
-                                                                technique=balance_technique,
-                                                                random_state=random_state)
-    return X_train_balanced, X_test_transformed, y_train_balanced, y_test
+    # Get transformed feature names
+    transformed_feature_names = preprocessor.get_feature_names_out()
+
+    return X_train_transformed, X_test_transformed, y_train, y_test, transformed_feature_names
 
 
 def train_models(train_sample: pd.DataFrame, target_feature: str, models: list, balance_technique: str, 
-                 random_state: int = None, test_size: float = 0.2, cv: int = 10) -> pd.DataFrame:
+                 test_size: float = 0.2, cv: int = 10, random_state: int = None) -> pd.DataFrame:
     """
     Trains multiple machine learning models using cross-validation, returns the model results,
     and saves the best model to the working directory.
@@ -264,12 +262,20 @@ def train_models(train_sample: pd.DataFrame, target_feature: str, models: list, 
 
     Returns:
         pd.DataFrame: DataFrame with model names and evaluation metrics.
-    """
+    """    
+    # Split the data into features and target
+    X = train_sample.drop(columns=[target_feature])
+    y = train_sample[target_feature]
+
+    # Handle class imbalance using the specified technique
+    X_train_balanced, y_train_balanced = handle_class_imbalance(X, y, technique=balance_technique,
+                                                                random_state=random_state)
 
     # Split the data into training and test sets
-    X_train, X_test, y_train, y_test = prepare_data(train_sample, target_feature, test_size,
-                                                    balance_technique, random_state)
-
+    X_train, X_test, y_train, y_test, transformed_feature_names = prepare_data(X_train_balanced, 
+                                                                               y_train_balanced, 
+                                                                               test_size, 
+                                                                               random_state)
     results = []
     best_accuracy = 0.0
     best_model = None
@@ -307,15 +313,6 @@ def train_models(train_sample: pd.DataFrame, target_feature: str, models: list, 
         joblib.dump(best_model, f"best_model_{best_model_name}.joblib")
         print(f"Best model {best_model_name} saved to best_model_{best_model_name}.joblib")
 
-        # Calculate SHAP values for the best model
-        explainer = shap.Explainer(best_model, X_train)
-        shap_values = explainer(X_train)
-
-        # Plot SHAP summary plot
-        shap.summary_plot(shap_values, X_train, plot_type='bar')
-        plt.title(f'SHAP Summary Plot for Best Model: {best_model_name}')
-        plt.show()
-
     # Create a DataFrame with the results
     columns = ['Model', 'Mean CV Accuracy', 'CV Accuracy Std', 'Accuracy', 'Precision', 'Recall',
                'F1-Score', 'Confusion Matrix']
@@ -327,7 +324,7 @@ def train_models(train_sample: pd.DataFrame, target_feature: str, models: list, 
         best_model_idx = results_df[results_df['Model'] == best_model_name].index[0]
         results_df.loc[best_model_idx, 'Best Model'] = True
 
-    return results_df
+    return results_df, transformed_feature_names
 
 
 def load_model(filename: str):
