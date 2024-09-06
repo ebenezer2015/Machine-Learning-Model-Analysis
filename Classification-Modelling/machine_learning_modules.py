@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-# import shap
 from imblearn.over_sampling import SMOTE, RandomOverSampler
 from imblearn.under_sampling import RandomUnderSampler
 from scipy.stats import skew
@@ -170,7 +169,7 @@ def shuffle_and_split(data: pd.DataFrame, target_feature: str, test_size: float 
     data = remove_unwanted_columns(data, columns_to_remove)    
     train_sample, validation_sample = train_test_split(data, test_size=test_size, random_state=random_state,
                                                        stratify=data[target_feature])
-                            
+                     
     return train_sample, validation_sample
 
 
@@ -243,7 +242,7 @@ def prepare_data(X: pd.DataFrame, y: pd.Series, test_size: float = 0.2, random_s
     # Get transformed feature names
     transformed_feature_names = preprocessor.get_feature_names_out()
 
-    return X_train_transformed, X_test_transformed, y_train, y_test, transformed_feature_names
+    return X_train_transformed, X_test_transformed, y_train, y_test, preprocessor, transformed_feature_names
 
 
 def train_models(train_sample: pd.DataFrame, target_feature: str, models: list, balance_technique: str, 
@@ -272,10 +271,10 @@ def train_models(train_sample: pd.DataFrame, target_feature: str, models: list, 
                                                                 random_state=random_state)
 
     # Split the data into training and test sets
-    X_train, X_test, y_train, y_test, transformed_feature_names = prepare_data(X_train_balanced, 
-                                                                               y_train_balanced, 
-                                                                               test_size, 
-                                                                               random_state)
+    X_train, X_test, y_train, y_test, preprocessor, transformed_feature_names = prepare_data(X_train_balanced, 
+                                                                                             y_train_balanced, 
+                                                                                             test_size, 
+                                                                                             random_state)
     results = []
     best_accuracy = 0.0
     best_model = None
@@ -311,6 +310,7 @@ def train_models(train_sample: pd.DataFrame, target_feature: str, models: list, 
     # Save the best model
     if best_model is not None:
         joblib.dump(best_model, f"best_model_{best_model_name}.joblib")
+        joblib.dump(preprocessor, "preprocessor.joblib")
         print(f"Best model {best_model_name} saved to best_model_{best_model_name}.joblib")
 
     # Create a DataFrame with the results
@@ -327,7 +327,7 @@ def train_models(train_sample: pd.DataFrame, target_feature: str, models: list, 
     return results_df, transformed_feature_names
 
 
-def load_model(filename: str):
+def load_model_artifact(filename: str):
     """
     Loads a model from a file.
 
@@ -340,3 +340,54 @@ def load_model(filename: str):
     model = joblib.load(filename)
     print(f"Model loaded from {filename}")
     return model
+
+
+def evaluate_model_on_validation_set(model, X_val, y_val):
+    """
+    Evaluates the model on a validation set and prints performance metrics.
+
+    Args:
+        model: Trained model instance.
+        X_val (pd.DataFrame): Features of the validation set.
+        y_val (pd.Series): True labels of the validation set.
+    """
+    # Predict on the validation set
+    y_pred = model.predict(X_val)
+
+    # Calculate evaluation metrics
+    accuracy = accuracy_score(y_val, y_pred)
+    precision = precision_score(y_val, y_pred, average='weighted')
+    recall = recall_score(y_val, y_pred, average='weighted')
+    f1 = f1_score(y_val, y_pred, average='weighted')
+    cm = confusion_matrix(y_val, y_pred)
+
+    # Print performance metrics
+    print("Validation Performance:")
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"F1-Score: {f1:.4f}")
+    print("Confusion Matrix:")
+    print(cm)
+
+
+def remove_prefixes(column_names, prefixes):
+    """Removes the specified prefixes from a list of column names.
+
+    Args:
+    column_names: A list of column names.
+    prefixes: A list of prefixes to remove.
+
+    Returns:
+    A new list of column names with the prefixes removed.
+    """
+    new_column_names = []
+    for column_name in column_names:
+        for prefix in prefixes:
+            if column_name.startswith(prefix):
+                column_name = column_name[len(prefix):]
+                break
+        # Remove leading underscore if it exists
+        column_name = column_name.lstrip('_')
+        new_column_names.append(column_name)
+    return new_column_names
